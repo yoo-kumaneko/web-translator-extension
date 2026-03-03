@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      width: 300px;
+      padding: 1rem;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #f8f9fa;
+      color: #333;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .logo {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, #0056b3, #d10056);
+      border-radius: 8px;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 1.25rem;
+      background: linear-gradient(135deg, #0056b3, #d10056);
+      background-clip: text;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    p {
+      font-size: 0.9rem;
+      color: #666;
+      margin-bottom: 1.5rem;
+    }
+
+    .actions {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    button {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 6px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    #translateBtn {
+      background: #0056b3;
+      color: white;
+    }
+
+    #translateBtn:hover {
+      background: #004494;
+    }
+
+    #stopBtn {
+      background: #f1f3f5;
+      color: #495057;
+      border: 1px solid #dee2e6;
+    }
+
+    #stopBtn:hover {
+      background: #e9ecef;
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .status {
+      margin-top: 10px;
+      font-size: 0.8rem;
+      text-align: center;
+      color: #28a745;
+      display: none;
+    }
+
+    .settings-toggle {
+      margin-top: 1.5rem;
+      font-size: 0.8rem;
+      color: #666;
+      cursor: pointer;
+      text-decoration: underline;
+      text-align: center;
+    }
+
+    .settings-panel {
+      display: none;
+      margin-top: 1rem;
+      padding-top: 1rem;
+      border-top: 1px solid #dee2e6;
+    }
+
+    .settings-panel label {
+      display: block;
+      font-size: 0.8rem;
+      margin-bottom: 5px;
+      color: #495057;
+    }
+
+    .settings-panel input {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ced4da;
+      border-radius: 4px;
+      margin-bottom: 5px;
+      box-sizing: border-box;
+    }
+
+    .api-help {
+      font-size: 0.7rem;
+      text-align: right;
+    }
+
+    .api-help a {
+      color: #0056b3;
+      text-decoration: none;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="header">
+    <div class="logo"></div>
+    <h2>Article Translator</h2>
+  </div>
+  <p>Translate news articles from English to Chinese side-by-side.</p>
+  <div class="actions">
+    <button id="translateBtn">Translate Article</button>
+    <button id="stopBtn">Turn Off</button>
+  </div>
+  <div id="status" class="status">Translation in progress...</div>
+
+  <div class="settings-toggle" id="settingsToggle">⚙️ Set Google API Key</div>
+  <div class="settings-panel" id="settingsPanel">
+    <label for="apiKey">Google Cloud API Key:</label>
+    <input type="password" id="apiKey" placeholder="Enter API Key...">
+    <div class="api-help">
+      <a href="https://cloud.google.com/translate/docs/setup" target="_blank">How to get a key?</a>
+    </div>
+    <button id="saveKeyBtn"
+      style="margin-top: 10px; padding: 8px; font-size: 0.9rem; background: #28a745; color: white;">Save Key</button>
+    <div id="saveStatus"
+      style="font-size: 0.75rem; text-align: center; margin-top: 5px; color: #28a745; display: none;">Saved!</div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+
+</html>

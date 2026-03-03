@@ -1,0 +1,32 @@
+/* Minimal styling for Web Article Translator to ensure seamless integration */
+
+.wat-translated-p {
+    /* Inherits almost everything from the original paragraph via cloned classes */
+    /* We only add a slight top margin to space it from the English text if needed, 
+       but if we want it to look EXACTLY like part of the article, we keep it minimal. */
+    margin-top: 0.5rem !important;
+}
+
+.wat-loading {
+    color: #888 !important;
+    font-style: italic;
+    animation: wat-pulse 1.5s infinite;
+}
+
+.wat-error {
+    color: #dc3545 !important;
+}
+
+@keyframes wat-pulse {
+    0% {
+        opacity: 0.5;
+    }
+
+    50% {
+        opacity: 0.8;
+    }
+
+    100% {
+        opacity: 0.5;
+    }
+}
