@@ -19,11 +19,14 @@ translateBtn.addEventListener('click', async () => {
             } else if (response && response.status === 'no_paragraphs_found') {
                 statusDiv.innerText = 'No article content found.';
                 statusDiv.style.color = '#666';
+            } else if (response && response.status === 'completed') {
+                statusDiv.innerText = `${response.count} paragraphs translated!`;
+                statusDiv.style.color = '#28a745';
+                translateBtn.innerText = 'Redo Translation';
             } else if (response && response.status === 'already_running') {
                 statusDiv.innerText = 'Already translating...';
             } else {
-                statusDiv.innerText = `Translating ${response.count} paragraphs...`;
-                translateBtn.innerText = 'Redo Translation';
+                statusDiv.innerText = `Translation started...`;
             }
         });
     }

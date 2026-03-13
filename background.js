@@ -44,10 +44,13 @@ async function translateOfficial(text, targetLang, apiKey) {
 
   const response = await fetch(url, {
     method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
     body: JSON.stringify({
       q: text,
       target: tl,
-      format: 'text'
+      format: 'html' // Changed from 'text' to 'html' to support batching tags
     })
   });
 
