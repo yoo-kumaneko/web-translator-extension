@@ -87,9 +87,22 @@ async function startTranslation() {
     isTranslating = true;
     console.log(`Translating ${elements.length} elements using context-aware batching...`);
 
+    const settings = await chrome.storage.local.get(['provider', 'googleChunkSize', 'llmChunkSize', 'qwenMtChunkSize', 'chunkSize']);
+    const provider = settings.provider || 'llm';
+    
+    let maxChunkSize = 3000;
+    if (provider === 'google') {
+        maxChunkSize = parseInt(settings.googleChunkSize) || parseInt(settings.chunkSize) || 3000;
+    } else if (provider === 'llm') {
+        maxChunkSize = parseInt(settings.llmChunkSize) || parseInt(settings.chunkSize) || 3000;
+    } else if (provider === 'qwenmt') {
+        maxChunkSize = parseInt(settings.qwenMtChunkSize) || parseInt(settings.chunkSize) || 3000;
+    }
+
     // 1. Prepare elements and UI placeholders
     const translationMap = new Map();
-    let batchHtml = "";
+    const chunks = [];
+    let currentChunk = "";
 
     elements.forEach((el, index) => {
         const id = `wat-${index}`;
@@ -111,56 +124,87 @@ async function startTranslation() {
         }
 
         // Add to batch string wrapped in spans to preserve context
-        // We escape the inner text briefly if needed, though innerText is usually safe
-        batchHtml += `<span id="${id}">${el.innerText}</span> `;
+        const spanHtml = `<span id="${id}">${el.innerText}</span> `;
+        if (currentChunk.length + spanHtml.length > maxChunkSize && currentChunk.length > 0) {
+            chunks.push(currentChunk);
+            currentChunk = spanHtml;
+        } else {
+            currentChunk += spanHtml;
+        }
     });
 
-    // 2. Perform Single Batch Translation
+    if (currentChunk.length > 0) {
+        chunks.push(currentChunk);
+    }
+
+    let totalApiUsed = "Unknown";
+    let totalCharCount = 0;
+    let totalPromptTokens = 0;
+    let totalCompletionTokens = 0;
+    let maxDuration = 0;
+
+    // 2. Perform Batch Translations All At Once
     try {
-        const response = await new Promise((resolve) => {
-            chrome.runtime.sendMessage(
-                { action: 'translate', text: batchHtml, targetLang: 'zh' },
-                (res) => resolve(res)
-            );
+        const promises = chunks.map(batchHtml => {
+            return new Promise((resolve) => {
+                chrome.runtime.sendMessage(
+                    { action: 'translate', text: batchHtml, targetLang: 'zh' },
+                    (res) => resolve(res)
+                );
+            });
+        });
+        const results = await Promise.all(promises);
+        
+        results.forEach(result => {
+            if (result && result.success) {
+                totalCharCount += result.charCount || 0;
+                totalPromptTokens += (result.tokens && result.tokens.prompt) || 0;
+                totalCompletionTokens += (result.tokens && result.tokens.completion) || 0;
+                maxDuration = Math.max(maxDuration, result.duration || 0);
+                totalApiUsed = result.apiUsed;
+
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = result.translatedText;
+                
+                // 3. Map translations back to placeholders
+                tempDiv.querySelectorAll('span').forEach(span => {
+                    const id = span.id;
+                    const translatedEl = document.querySelector(`.wat-translated-p[data-wat-id="${id}"]`);
+                    let translatedHtml = span.innerText.trim();
+                    if (translatedHtml) {
+                        if (translatedEl) {
+                            translatedEl.innerText = translatedHtml;
+                            translatedEl.classList.remove('wat-loading');
+                        }
+                    }
+                });
+            }
         });
 
-        if (response && response.success) {
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = response.translatedText;
+        // Clean up any remaining loaders if span IDs were mangled
+        document.querySelectorAll('.wat-loading').forEach(el => {
+            el.innerText = '无法获取对应翻译';
+            el.classList.remove('wat-loading');
+            el.classList.add('wat-error');
+        });
 
-            // 3. Map translations back to placeholders
-            tempDiv.querySelectorAll('span').forEach(span => {
-                const id = span.id;
-                const translatedEl = document.querySelector(`.wat-translated-p[data-wat-id="${id}"]`);
-                if (translatedHtml = span.innerText.trim()) {
-                    if (translatedEl) {
-                        translatedEl.innerText = translatedHtml;
-                        translatedEl.classList.remove('wat-loading');
-                    }
-                }
-            });
-
-            // Clean up any remaining loaders if span IDs were mangled
-            document.querySelectorAll('.wat-loading').forEach(el => {
-                el.innerText = '无法获取对应翻译';
-                el.classList.remove('wat-loading');
-                el.classList.add('wat-error');
-            });
-
-        } else {
-            document.querySelectorAll('.wat-loading').forEach(el => {
-                el.innerText = '翻译失败';
-                el.classList.remove('wat-loading');
-                el.classList.add('wat-error');
-            });
-        }
     } catch (err) {
         console.error("Batch translation failed:", err);
     } finally {
         isTranslating = false;
     }
 
-    return { status: 'completed', count: elements.length };
+    return { 
+        status: 'completed', 
+        count: elements.length, 
+        apiUsed: totalApiUsed, 
+        charCount: totalCharCount,
+        duration: maxDuration,
+        tokens: {
+            prompt: totalPromptTokens,
+            completion: totalCompletionTokens
+        }
+    };
 }
 
 init();

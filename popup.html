@@ -90,6 +90,14 @@
       display: none;
     }
 
+    .metrics {
+      margin-top: 5px;
+      font-size: 0.7rem;
+      text-align: center;
+      color: #6c757d;
+      display: none;
+    }
+
     .settings-toggle {
       margin-top: 1.5rem;
       font-size: 0.8rem;
@@ -145,16 +153,65 @@
     <button id="stopBtn">Turn Off</button>
   </div>
   <div id="status" class="status">Translation in progress...</div>
+  <div id="metrics" class="metrics"></div>
 
-  <div class="settings-toggle" id="settingsToggle">⚙️ Set Google API Key</div>
+  <div class="settings-toggle" id="settingsToggle">⚙️ Settings & API Keys</div>
   <div class="settings-panel" id="settingsPanel">
-    <label for="apiKey">Google Cloud API Key:</label>
-    <input type="password" id="apiKey" placeholder="Enter API Key...">
-    <div class="api-help">
-      <a href="https://cloud.google.com/translate/docs/setup" target="_blank">How to get a key?</a>
+    <label for="provider">Translation Service:</label>
+    <select id="provider" style="width: 100%; margin-bottom: 10px; padding: 5px;">
+      <option value="google">Google Translate</option>
+      <option value="llm">OpenAI Models</option>
+      <option value="qwenmt">Qwen Machine Translation (MT)</option>
+    </select>
+
+    <div id="googleSettings">
+      <label for="googleModel">Google Translate Model:</label>
+      <select id="googleModel" style="width: 100%; margin-bottom: 10px; padding: 5px;">
+        <option value="legacy">Legacy (Free / Unofficial)</option>
+        <option value="official">Official (Paid / API Key required)</option>
+      </select>
+      
+      <label for="apiKey">Google Cloud API Key:</label>
+      <input type="password" id="apiKey" placeholder="Leave blank for free tier...">
+      
+      <label for="googleChunkSize">Max Chunk Size (chars):</label>
+      <input type="number" id="googleChunkSize" placeholder="3000" value="3000">
+
+      <div class="api-help">
+        <a href="https://cloud.google.com/translate/docs/setup" target="_blank">How to get a key?</a>
+      </div>
     </div>
-    <button id="saveKeyBtn"
-      style="margin-top: 10px; padding: 8px; font-size: 0.9rem; background: #28a745; color: white;">Save Key</button>
+
+    <div id="llmSettings" style="display: none;">
+      <label for="llmEndpoint">Base URL:</label>
+      <input type="text" id="llmEndpoint" placeholder="https://api.openai.com/v1">
+      <label for="llmApiKey">API Key:</label>
+      <input type="password" id="llmApiKey" placeholder="sk-...">
+      <label for="llmModel">Model Name:</label>
+      <input type="text" id="llmModel" placeholder="gpt-4o-mini">
+      
+      <label for="llmChunkSize">Max Chunk Size (chars):</label>
+      <input type="number" id="llmChunkSize" placeholder="3000" value="3000">
+    </div>
+
+    <div id="qwenMtSettings" style="display: none;">
+      <label for="qwenMtEndpoint">Base URL:</label>
+      <input type="text" id="qwenMtEndpoint" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1">
+      <label for="qwenMtApiKey">API Key:</label>
+      <input type="password" id="qwenMtApiKey" placeholder="sk-...">
+      <label for="qwenMtModel">Model Name:</label>
+      <select id="qwenMtModel" style="width: 100%; margin-bottom: 10px; padding: 5px;">
+        <option value="qwen-mt-flash">qwen-mt-flash (General Choice)</option>
+        <option value="qwen-mt-plus">qwen-mt-plus (Better Quality)</option>
+        <option value="qwen-mt-lite">qwen-mt-lite (Fast)</option>
+      </select>
+      
+      <label for="qwenMtChunkSize">Max Chunk Size (chars):</label>
+      <input type="number" id="qwenMtChunkSize" placeholder="3000" value="3000">
+    </div>
+
+    <button id="saveKeyBtn" 
+      style="margin-top: 20px; padding: 8px; font-size: 0.9rem; background: #28a745; color: white;">Save Settings</button>
     <div id="saveStatus"
       style="font-size: 0.75rem; text-align: center; margin-top: 5px; color: #28a745; display: none;">Saved!</div>
   </div>

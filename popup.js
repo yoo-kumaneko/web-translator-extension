@@ -11,6 +11,9 @@ translateBtn.addEventListener('click', async () => {
         statusDiv.innerText = 'Initializing translation...';
         translateBtn.disabled = true;
 
+        const metricsDiv = document.getElementById('metrics');
+        if (metricsDiv) metricsDiv.style.display = 'none'; // Ensure metrics are hidden on new translation start
+
         chrome.tabs.sendMessage(tab.id, { action: 'startTranslation' }, (response) => {
             translateBtn.disabled = false;
             if (chrome.runtime.lastError) {
@@ -22,6 +25,20 @@ translateBtn.addEventListener('click', async () => {
             } else if (response && response.status === 'completed') {
                 statusDiv.innerText = `${response.count} paragraphs translated!`;
                 statusDiv.style.color = '#28a745';
+                
+                // Display Metrics
+                const metricsDiv = document.getElementById('metrics');
+                metricsDiv.style.display = 'block';
+                
+                let metricsText = `Model: <strong>${response.apiUsed || 'Unknown'}</strong> • Cost: <strong>${response.charCount || 0}</strong> chars`;
+                if (response.duration) {
+                    metricsText += ` • Time: <strong>${(response.duration / 1000).toFixed(1)}s</strong>`;
+                }
+                if (response.tokens && (response.tokens.prompt > 0 || response.tokens.completion > 0)) {
+                    metricsText += `<br>Tokens: <strong>${response.tokens.prompt}</strong> in / <strong>${response.tokens.completion}</strong> out`;
+                }
+                metricsDiv.innerHTML = metricsText;
+
                 translateBtn.innerText = 'Redo Translation';
             } else if (response && response.status === 'already_running') {
                 statusDiv.innerText = 'Already translating...';
@@ -39,6 +56,9 @@ stopBtn.addEventListener('click', async () => {
             statusDiv.innerText = 'Translation turned off.';
             statusDiv.style.color = '#666';
             translateBtn.innerText = 'Translate Article';
+            
+            const metricsDiv = document.getElementById('metrics');
+            if(metricsDiv) metricsDiv.style.display = 'none';
         });
     }
 });
@@ -46,15 +66,58 @@ stopBtn.addEventListener('click', async () => {
 // Settings Logic
 const settingsToggle = document.getElementById('settingsToggle');
 const settingsPanel = document.getElementById('settingsPanel');
+const providerSelect = document.getElementById('provider');
+const googleSettings = document.getElementById('googleSettings');
+const llmSettings = document.getElementById('llmSettings');
+const qwenMtSettings = document.getElementById('qwenMtSettings'); // Added
+const googleModelSelect = document.getElementById('googleModel'); // Added
 const apiKeyInput = document.getElementById('apiKey');
+const llmEndpointInput = document.getElementById('llmEndpoint');
+const llmApiKeyInput = document.getElementById('llmApiKey');
+const llmModelInput = document.getElementById('llmModel');
+const qwenMtEndpointInput = document.getElementById('qwenMtEndpoint'); // Added
+const qwenMtApiKeyInput = document.getElementById('qwenMtApiKey'); // Added
+const qwenMtModelSelect = document.getElementById('qwenMtModel'); // Added
+const googleChunkSizeInput = document.getElementById('googleChunkSize'); // Added
+const llmChunkSizeInput = document.getElementById('llmChunkSize'); // Added
+const qwenMtChunkSizeInput = document.getElementById('qwenMtChunkSize'); // Added
 const saveKeyBtn = document.getElementById('saveKeyBtn');
 const saveStatus = document.getElementById('saveStatus');
 
-// Load existing key
-chrome.storage.local.get(['googleApiKey'], (result) => {
-    if (result.googleApiKey) {
-        apiKeyInput.value = result.googleApiKey;
-    }
+function updateProviderUI() {
+    const provider = providerSelect.value;
+    googleSettings.style.display = provider === 'google' ? 'block' : 'none';
+    llmSettings.style.display = provider === 'llm' ? 'block' : 'none';
+    qwenMtSettings.style.display = provider === 'qwenmt' ? 'block' : 'none';
+}
+
+providerSelect.addEventListener('change', updateProviderUI);
+
+// Load existing settings
+chrome.storage.local.get([
+    'provider', 'googleApiKey', 'llmEndpoint', 'llmApiKey', 'llmModel', 
+    'googleChunkSize', 'llmChunkSize', 'qwenMtChunkSize', 'chunkSize',
+    'googleModel', 'qwenMtEndpoint', 'qwenMtApiKey', 'qwenMtModel'
+], (result) => {
+    providerSelect.value = result.provider || 'llm'; 
+    googleModelSelect.value = result.googleModel || 'legacy';
+    apiKeyInput.value = result.googleApiKey || '';
+    llmEndpointInput.value = result.llmEndpoint || 'https://api.openai.com/v1';
+    llmApiKeyInput.value = result.llmApiKey || '';
+    llmModelInput.value = result.llmModel || 'gpt-4o-mini';
+    
+    // Qwen MT Defaults
+    qwenMtEndpointInput.value = result.qwenMtEndpoint || 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+    qwenMtApiKeyInput.value = result.qwenMtApiKey || '';
+    qwenMtModelSelect.value = result.qwenMtModel || 'qwen-mt-flash';
+    
+    // Chunk Sizes (with fallback to old shared chunkSize)
+    const oldSharedSize = result.chunkSize || 3000;
+    googleChunkSizeInput.value = result.googleChunkSize || oldSharedSize;
+    llmChunkSizeInput.value = result.llmChunkSize || oldSharedSize;
+    qwenMtChunkSizeInput.value = result.qwenMtChunkSize || oldSharedSize;
+    
+    updateProviderUI();
 });
 
 settingsToggle.addEventListener('click', () => {
@@ -64,7 +127,23 @@ settingsToggle.addEventListener('click', () => {
 
 saveKeyBtn.addEventListener('click', () => {
     const key = apiKeyInput.value.trim();
-    chrome.storage.local.set({ googleApiKey: key }, () => {
+    
+    const settings = {
+        provider: providerSelect.value,
+        googleModel: googleModelSelect.value,
+        googleApiKey: key,
+        googleChunkSize: parseInt(googleChunkSizeInput.value.trim()) || 3000,
+        llmEndpoint: llmEndpointInput.value.trim(),
+        llmApiKey: llmApiKeyInput.value.trim(),
+        llmModel: llmModelInput.value.trim(),
+        llmChunkSize: parseInt(llmChunkSizeInput.value.trim()) || 3000,
+        qwenMtEndpoint: qwenMtEndpointInput.value.trim(),
+        qwenMtApiKey: qwenMtApiKeyInput.value.trim(),
+        qwenMtModel: qwenMtModelSelect.value,
+        qwenMtChunkSize: parseInt(qwenMtChunkSizeInput.value.trim()) || 3000
+    };
+    
+    chrome.storage.local.set(settings, () => {
         saveStatus.style.display = 'block';
         setTimeout(() => {
             saveStatus.style.display = 'none';
