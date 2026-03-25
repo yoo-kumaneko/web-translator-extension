@@ -28,7 +28,10 @@ function init() {
 }
 
 function shouldTranslate(el) {
-    if (!el || el.offsetParent === null) return false;
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+    if (el.offsetHeight === 0 && el.offsetWidth === 0) return false;
     if (!TARGET_TAGS.includes(el.tagName)) return false;
 
     const text = el.innerText ? el.innerText.trim() : "";
@@ -42,7 +45,14 @@ function shouldTranslate(el) {
         const tagName = current.tagName.toLowerCase();
 
         if (['nav', 'header', 'footer', 'aside'].includes(tagName)) return false;
-        if (EXCLUDE_KEYWORDS.some(kw => classStr.includes(kw) || idStr.includes(kw))) return false;
+        if (EXCLUDE_KEYWORDS.some(kw => idStr.includes(kw))) return false;
+        const classTokens = classStr.split(/\s+/);
+        if (classTokens.some(token => {
+            // Strip Tailwind group modifiers (e.g., "group/header-bar" → "header-bar")
+            // and arbitrary values in brackets (e.g., "scroll-mt-[calc(var(--header-h))]" → "scroll-mt-")
+            const base = token.split('/').pop().replace(/\[.*?\]/g, '');
+            return EXCLUDE_KEYWORDS.some(kw => base.startsWith(kw));
+        })) return false;
         if (current.getAttribute('role') === 'button' || current.getAttribute('role') === 'menuitem') return false;
 
         current = current.parentElement;
