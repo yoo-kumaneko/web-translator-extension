@@ -132,19 +132,28 @@ saveKeyBtn.addEventListener('click', () => {
         provider: providerSelect.value,
         googleModel: googleModelSelect.value,
         googleApiKey: key,
-        googleChunkSize: parseInt(googleChunkSizeInput.value.trim()) || 3000,
+        googleChunkSize: Math.min(Math.max(parseInt(googleChunkSizeInput.value.trim()) || 3000, 500), 10000),
         llmEndpoint: llmEndpointInput.value.trim(),
         llmApiKey: llmApiKeyInput.value.trim(),
         llmModel: llmModelInput.value.trim(),
-        llmChunkSize: parseInt(llmChunkSizeInput.value.trim()) || 3000,
+        llmChunkSize: Math.min(Math.max(parseInt(llmChunkSizeInput.value.trim()) || 3000, 500), 10000),
         qwenMtEndpoint: qwenMtEndpointInput.value.trim(),
         qwenMtApiKey: qwenMtApiKeyInput.value.trim(),
         qwenMtModel: qwenMtModelSelect.value,
-        qwenMtChunkSize: parseInt(qwenMtChunkSizeInput.value.trim()) || 3000
+        qwenMtChunkSize: Math.min(Math.max(parseInt(qwenMtChunkSizeInput.value.trim()) || 3000, 500), 10000)
     };
     
     chrome.storage.local.set(settings, () => {
+        if (chrome.runtime.lastError) {
+            saveStatus.style.display = 'block';
+            saveStatus.innerText = 'Error saving settings!';
+            saveStatus.style.color = 'red';
+            console.error('Settings save failed:', chrome.runtime.lastError.message);
+            return;
+        }
         saveStatus.style.display = 'block';
+        saveStatus.innerText = 'Settings saved!';
+        saveStatus.style.color = '#28a745';
         setTimeout(() => {
             saveStatus.style.display = 'none';
         }, 2000);

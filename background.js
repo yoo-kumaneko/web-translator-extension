@@ -4,13 +4,24 @@
 
 console.log("Background service worker started.");
 
+/** Helper: fetch with timeout via AbortController */
+function fetchWithTimeout(url, options, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal })
+    .finally(() => clearTimeout(timer));
+}
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'translate') {
     handleTranslation(request.text, request.targetLang)
       .then(result => sendResponse({ success: true, ...result }))
       .catch(error => {
         console.error("Translation error:", error);
-        sendResponse({ success: false, error: error.message });
+        const message = error.name === 'AbortError'
+          ? 'Translation request timed out. Try reducing chunk size or using a faster provider.'
+          : error.message;
+        sendResponse({ success: false, error: message });
       });
     return true; // Keep the message channel open for async response
   }
@@ -20,7 +31,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
  * Orchestrates translation using either official or unofficial API.
  */
 async function handleTranslation(text, targetLang) {
-  const settings = await chrome.storage.local.get(['provider', 'googleApiKey', 'googleModel', 'llmEndpoint', 'llmApiKey', 'llmModel', 'maxTokens', 'qwenMtEndpoint', 'qwenMtApiKey', 'qwenMtModel']);
+  const settings = await chrome.storage.local.get(['provider', 'googleApiKey', 'googleModel', 'llmEndpoint', 'llmApiKey', 'llmModel', 'qwenMtEndpoint', 'qwenMtApiKey', 'qwenMtModel']);
   const charCount = text.length;
 
   if (settings.provider === 'llm') {
@@ -67,7 +78,7 @@ async function translateQwenMT(text, targetLang, settings) {
   const targetLangName = targetLang === 'zh' ? 'Chinese' : 'English';
 
   const startTime = performance.now();
-  const response = await fetch(endpoint, {
+  const response = await fetchWithTimeout(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -83,7 +94,7 @@ async function translateQwenMT(text, targetLang, settings) {
         target_lang: targetLangName
       }
     })
-  });
+  }, 60000);
 
   const duration = performance.now() - startTime;
 
@@ -98,9 +109,9 @@ async function translateQwenMT(text, targetLang, settings) {
     if (response.status === 400 && errorData && errorData.error && errorData.error.code === 'data_inspection_failed') {
         console.warn("Qwen-MT refused to translate due to safety filters. Falling back to Google (Free).");
         try {
-            const translatedText = await translateUnofficial(text, targetLang);
+            const translatedText = await translateUnofficialBatch(text, targetLang);
             return {
-                translatedText: `[fallback] ${translatedText}`,
+                translatedText,
                 apiUsed: `Qwen-MT (Safety Fallback to Free Google)`,
                 charCount,
                 duration,
@@ -157,7 +168,7 @@ Only translate the human-readable textual content within the tags.
 Return ONLY the translated HTML content. Do NOT wrap your response in markdown code blocks like \`\`\`html. Do not add any conversational text.`;
 
   const startTime = performance.now();
-  const response = await fetch(endpoint, {
+  const response = await fetchWithTimeout(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -170,12 +181,12 @@ Return ONLY the translated HTML content. Do NOT wrap your response in markdown c
         { role: 'user', content: text }
       ],
       // Standard OpenAI params
-      max_tokens: settings.maxTokens || 4096, 
+      max_tokens: 8000,
       temperature: 0.7,
       top_p: 0.8,
       presence_penalty: 1.5
     })
-  });
+  }, 60000);
 
   const duration = performance.now() - startTime;
 
@@ -201,14 +212,7 @@ Return ONLY the translated HTML content. Do NOT wrap your response in markdown c
   let translatedText = data.choices[0].message.content.trim();
   
   // Clean up any residual markdown blocks the LLM might have still added
-  if (translatedText.startsWith("```html")) {
-      translatedText = translatedText.substring(7);
-  } else if (translatedText.startsWith("```")) {
-      translatedText = translatedText.substring(3);
-  }
-  if (translatedText.endsWith("```")) {
-      translatedText = translatedText.substring(0, translatedText.length - 3);
-  }
+  translatedText = translatedText.replace(/^```(?:html)?\n?|\n?```$/g, '');
 
   const usage = data.usage || {};
   
@@ -231,7 +235,7 @@ async function translateOfficial(text, targetLang, apiKey) {
   const tl = targetLang === 'zh' ? 'zh-CN' : targetLang;
   const url = `https://translation.googleapis.com/language/translate/v2?key=${apiKey}`;
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
@@ -241,7 +245,7 @@ async function translateOfficial(text, targetLang, apiKey) {
       target: tl,
       format: 'html' // Changed from 'text' to 'html' to support batching tags
     })
-  });
+  }, 30000);
 
   if (!response.ok) {
     const errorData = await response.json();
@@ -253,16 +257,21 @@ async function translateOfficial(text, targetLang, apiKey) {
 }
 
 /**
- * Calls the unofficial Google Translate API.
+ * Calls the unofficial Google Translate API (POST to avoid URL length limits).
  */
 async function translateUnofficial(text, targetLang) {
   // targetLang 'zh' often needs to be 'zh-CN' for this API
   const tl = targetLang === 'zh' ? 'zh-CN' : targetLang;
 
-  // client=webapp often yields better results than client=gtx in some regions
-  const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=${tl}&dt=t&q=${encodeURIComponent(text)}`;
+  const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=${tl}&dt=t`;
 
-  const response = await fetch(url);
+  const response = await fetchWithTimeout(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: `q=${encodeURIComponent(text)}`
+  }, 30000);
   if (!response.ok) {
     throw new Error(`Unofficial API returned status ${response.status}`);
   }
@@ -274,4 +283,32 @@ async function translateUnofficial(text, targetLang) {
   }
 
   throw new Error("Invalid response format from Google Translate");
+}
+
+/**
+ * Translates an HTML batch (with <span id="wat-N"> wrappers) by extracting
+ * each span's text, translating individually, and reassembling the HTML.
+ * Used as a fallback when the primary provider rejects a batch.
+ */
+async function translateUnofficialBatch(html, targetLang) {
+  const spanRegex = /<span id="(wat-\d+)">([\s\S]*?)<\/span>/g;
+  const spans = [];
+  let match;
+  while ((match = spanRegex.exec(html)) !== null) {
+    spans.push({ id: match[1], text: match[2] });
+  }
+
+  if (spans.length === 0) {
+    // No span structure found — translate as plain text
+    return await translateUnofficial(html, targetLang);
+  }
+
+  const translated = await Promise.all(
+    spans.map(async (span) => {
+      const result = await translateUnofficial(span.text, targetLang);
+      return `<span id="${span.id}">[Google翻译] ${result}</span>`;
+    })
+  );
+
+  return translated.join(' ');
 }

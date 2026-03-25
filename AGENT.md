@@ -37,7 +37,7 @@ The **Web Article Translator** is a Chrome extension designed to translate web a
 *   **`popup.html` & `popup.js`**:
     *   The user interface accessible by clicking the extension icon.
     *   Handles user settings: selecting the active translation provider, entering API keys, setting base URLs, selecting specific models, and defining max chunk sizes.
-    *   Settings are persisted using `chrome.storage.sync`.
+    *   Settings are persisted using `chrome.storage.local` (chosen over `sync` to keep API keys on-device).
     *   Provides live status updates during the translation process (e.g., "Translating 15 paragraphs").
 *   **`background.js`**:
     *   The core engine running invisibly in the background.

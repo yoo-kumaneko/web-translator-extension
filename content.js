@@ -137,7 +137,7 @@ async function startTranslation() {
         chunks.push(currentChunk);
     }
 
-    let totalApiUsed = "Unknown";
+    let totalApiUsed = new Set();
     let totalCharCount = 0;
     let totalPromptTokens = 0;
     let totalCompletionTokens = 0;
@@ -161,7 +161,7 @@ async function startTranslation() {
                 totalPromptTokens += (result.tokens && result.tokens.prompt) || 0;
                 totalCompletionTokens += (result.tokens && result.tokens.completion) || 0;
                 maxDuration = Math.max(maxDuration, result.duration || 0);
-                totalApiUsed = result.apiUsed;
+                totalApiUsed.add(result.apiUsed);
 
                 const tempDiv = document.createElement('div');
                 tempDiv.innerHTML = result.translatedText;
@@ -197,7 +197,7 @@ async function startTranslation() {
     return { 
         status: 'completed', 
         count: elements.length, 
-        apiUsed: totalApiUsed, 
+        apiUsed: [...totalApiUsed].join(' + ') || 'Unknown',
         charCount: totalCharCount,
         duration: maxDuration,
         tokens: {
