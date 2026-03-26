@@ -71,13 +71,24 @@ function shouldTranslate(el) {
 }
 
 function getArticleElements() {
-    const elements = [];
+    const candidates = [];
     const all = document.querySelectorAll(TARGET_TAGS.join(', '));
     all.forEach(el => {
         if (shouldTranslate(el)) {
-            elements.push(el);
+            candidates.push(el);
         }
     });
+
+    // Remove ancestors when a more specific descendant is already in the list.
+    // This prevents e.g. a <figcaption> and its inner <p> both being translated.
+    const candidateSet = new Set(candidates);
+    const elements = candidates.filter(el => {
+        for (const other of candidateSet) {
+            if (other !== el && el.contains(other)) return false;
+        }
+        return true;
+    });
+
     return elements;
 }
 
@@ -133,8 +144,13 @@ async function startTranslation() {
             el.dataset.translated = 'true';
         }
 
+        // Clone and strip screen-reader-only / accessibility-hidden text
+        const clone = el.cloneNode(true);
+        clone.querySelectorAll('.sr-only, .visually-hidden, .screen-reader-text, [aria-hidden="true"]').forEach(n => n.remove());
+        const cleanText = clone.innerText;
+
         // Add to batch string wrapped in spans to preserve context
-        const spanHtml = `<span id="${id}">${el.innerText}</span> `;
+        const spanHtml = `<span id="${id}">${cleanText}</span> `;
         if (currentChunk.length + spanHtml.length > maxChunkSize && currentChunk.length > 0) {
             chunks.push(currentChunk);
             currentChunk = spanHtml;
