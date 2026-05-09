@@ -10,6 +10,9 @@ const EXCLUDE_KEYWORDS = [
 ];
 
 let isTranslating = false;
+let translationCache = new Map(); // originalText → translatedText
+let lastResult = null;            // last translation result for popup restore
+let translationsVisible = true;   // visibility state of translated elements
 
 function init() {
     console.log("Web Article Translator: Context-Aware Batching active.");
@@ -23,6 +26,21 @@ function init() {
         if (request.action === 'stopTranslation') {
             stopTranslation();
             sendResponse({ status: 'stopped' });
+        }
+        if (request.action === 'getState') {
+            const hasTranslations = document.querySelectorAll('.wat-translated-p').length > 0;
+            sendResponse({
+                hasTranslations,
+                isVisible: translationsVisible,
+                result: lastResult
+            });
+        }
+        if (request.action === 'toggleTranslation') {
+            translationsVisible = !translationsVisible;
+            document.querySelectorAll('.wat-translated-p').forEach(el => {
+                el.style.display = translationsVisible ? '' : 'none';
+            });
+            sendResponse({ isVisible: translationsVisible });
         }
     });
 }
@@ -96,21 +114,28 @@ function stopTranslation() {
     document.querySelectorAll('.wat-translated-p').forEach(el => el.remove());
     document.querySelectorAll('[data-translated="true"]').forEach(el => delete el.dataset.translated);
     isTranslating = false;
+    translationCache.clear();
+    lastResult = null;
+    translationsVisible = true;
 }
 
 async function startTranslation() {
     if (isTranslating) return { status: 'already_running' };
-    stopTranslation();
+
+    // Remove existing translation DOM elements but keep the cache
+    document.querySelectorAll('.wat-translated-p').forEach(el => el.remove());
+    document.querySelectorAll('[data-translated="true"]').forEach(el => delete el.dataset.translated);
 
     const elements = getArticleElements();
     if (elements.length === 0) return { status: 'no_paragraphs_found' };
 
     isTranslating = true;
+    translationsVisible = true;
     console.log(`Translating ${elements.length} elements using context-aware batching...`);
 
     const settings = await chrome.storage.local.get(['provider', 'googleChunkSize', 'llmChunkSize', 'qwenMtChunkSize', 'chunkSize']);
     const provider = settings.provider || 'llm';
-    
+
     let maxChunkSize = 3000;
     if (provider === 'google') {
         maxChunkSize = parseInt(settings.googleChunkSize) || parseInt(settings.chunkSize) || 3000;
@@ -120,20 +145,56 @@ async function startTranslation() {
         maxChunkSize = parseInt(settings.qwenMtChunkSize) || parseInt(settings.chunkSize) || 3000;
     }
 
-    // 1. Prepare elements and UI placeholders
+    // 1. Prepare elements — split into cached and uncached
     const translationMap = new Map();
+    const cachedElements = [];   // elements with cached translations
+    const uncachedElements = []; // elements needing API translation
     const chunks = [];
     let currentChunk = "";
+    let uncachedIndex = 0;
 
-    elements.forEach((el, index) => {
-        const id = `wat-${index}`;
-        translationMap.set(id, el);
+    elements.forEach((el) => {
+        // Clone and strip screen-reader-only / accessibility-hidden text
+        const clone = el.cloneNode(true);
+        clone.querySelectorAll('.sr-only, .visually-hidden, .screen-reader-text, [aria-hidden="true"]').forEach(n => n.remove());
+        const cleanText = clone.innerText;
+
+        if (translationCache.has(cleanText)) {
+            cachedElements.push({ el, cleanText });
+        } else {
+            uncachedElements.push({ el, cleanText, id: `wat-${uncachedIndex}` });
+            uncachedIndex++;
+        }
+    });
+
+    // 2. Insert cached translations immediately (no API call)
+    let cachedCount = 0;
+    cachedElements.forEach(({ el, cleanText }) => {
+        const translatedEl = el.cloneNode(false);
+        translatedEl.classList.add('wat-translated-p');
+        translatedEl.innerText = translationCache.get(cleanText);
+        translatedEl.removeAttribute('id');
+
+        if (['H1', 'H2', 'H3'].includes(el.tagName)) {
+            translatedEl.style.opacity = '0.8';
+        }
+
+        if (el.parentNode) {
+            el.parentNode.insertBefore(translatedEl, el.nextSibling);
+            el.dataset.translated = 'true';
+            cachedCount++;
+        }
+    });
+
+    // 3. Prepare uncached elements for API translation
+    uncachedElements.forEach(({ el, cleanText, id }) => {
+        translationMap.set(id, { el, cleanText });
 
         const translatedEl = el.cloneNode(false);
         translatedEl.classList.add('wat-translated-p', 'wat-loading');
         translatedEl.innerText = '正在翻译...';
         translatedEl.removeAttribute('id');
-        translatedEl.dataset.watId = id; // Map back to this element
+        translatedEl.dataset.watId = id;
 
         if (['H1', 'H2', 'H3'].includes(el.tagName)) {
             translatedEl.style.opacity = '0.8';
@@ -144,12 +205,6 @@ async function startTranslation() {
             el.dataset.translated = 'true';
         }
 
-        // Clone and strip screen-reader-only / accessibility-hidden text
-        const clone = el.cloneNode(true);
-        clone.querySelectorAll('.sr-only, .visually-hidden, .screen-reader-text, [aria-hidden="true"]').forEach(n => n.remove());
-        const cleanText = clone.innerText;
-
-        // Add to batch string wrapped in spans to preserve context
         const spanHtml = `<span id="${id}">${cleanText}</span> `;
         if (currentChunk.length + spanHtml.length > maxChunkSize && currentChunk.length > 0) {
             chunks.push(currentChunk);
@@ -169,61 +224,70 @@ async function startTranslation() {
     let totalCompletionTokens = 0;
     let maxDuration = 0;
 
-    // 2. Perform Batch Translations All At Once
-    try {
-        const promises = chunks.map(batchHtml => {
-            return new Promise((resolve) => {
-                chrome.runtime.sendMessage(
-                    { action: 'translate', text: batchHtml, targetLang: 'zh' },
-                    (res) => resolve(res)
-                );
-            });
-        });
-        const results = await Promise.all(promises);
-        
-        results.forEach(result => {
-            if (result && result.success) {
-                totalCharCount += result.charCount || 0;
-                totalPromptTokens += (result.tokens && result.tokens.prompt) || 0;
-                totalCompletionTokens += (result.tokens && result.tokens.completion) || 0;
-                maxDuration = Math.max(maxDuration, result.duration || 0);
-                totalApiUsed.add(result.apiUsed);
-
-                const tempDiv = document.createElement('div');
-                tempDiv.innerHTML = result.translatedText;
-                
-                // 3. Map translations back to placeholders
-                tempDiv.querySelectorAll('span').forEach(span => {
-                    const id = span.id;
-                    const translatedEl = document.querySelector(`.wat-translated-p[data-wat-id="${id}"]`);
-                    let translatedHtml = span.innerText.trim();
-                    if (translatedHtml) {
-                        if (translatedEl) {
-                            translatedEl.innerText = translatedHtml;
-                            translatedEl.classList.remove('wat-loading');
-                        }
-                    }
+    // 4. Perform Batch Translations for uncached elements
+    if (chunks.length > 0) {
+        try {
+            const promises = chunks.map(batchHtml => {
+                return new Promise((resolve) => {
+                    chrome.runtime.sendMessage(
+                        { action: 'translate', text: batchHtml, targetLang: 'zh' },
+                        (res) => resolve(res)
+                    );
                 });
-            }
-        });
+            });
+            const results = await Promise.all(promises);
 
-        // Clean up any remaining loaders if span IDs were mangled
-        document.querySelectorAll('.wat-loading').forEach(el => {
-            el.innerText = '无法获取对应翻译';
-            el.classList.remove('wat-loading');
-            el.classList.add('wat-error');
-        });
+            results.forEach(result => {
+                if (result && result.success) {
+                    totalCharCount += result.charCount || 0;
+                    totalPromptTokens += (result.tokens && result.tokens.prompt) || 0;
+                    totalCompletionTokens += (result.tokens && result.tokens.completion) || 0;
+                    maxDuration = Math.max(maxDuration, result.duration || 0);
+                    totalApiUsed.add(result.apiUsed);
 
-    } catch (err) {
-        console.error("Batch translation failed:", err);
-    } finally {
-        isTranslating = false;
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = result.translatedText;
+
+                    // 5. Map translations back to placeholders and cache them
+                    tempDiv.querySelectorAll('span').forEach(span => {
+                        const id = span.id;
+                        const translatedEl = document.querySelector(`.wat-translated-p[data-wat-id="${id}"]`);
+                        let translatedHtml = span.innerText.trim();
+                        if (translatedHtml) {
+                            if (translatedEl) {
+                                translatedEl.innerText = translatedHtml;
+                                translatedEl.classList.remove('wat-loading');
+                            }
+                            // Store in cache
+                            const entry = translationMap.get(id);
+                            if (entry) {
+                                translationCache.set(entry.cleanText, translatedHtml);
+                            }
+                        }
+                    });
+                }
+            });
+
+            // Clean up any remaining loaders if span IDs were mangled
+            document.querySelectorAll('.wat-loading').forEach(el => {
+                el.innerText = '无法获取对应翻译';
+                el.classList.remove('wat-loading');
+                el.classList.add('wat-error');
+            });
+
+        } catch (err) {
+            console.error("Batch translation failed:", err);
+        }
     }
 
-    return { 
-        status: 'completed', 
-        count: elements.length, 
-        apiUsed: [...totalApiUsed].join(' + ') || 'Unknown',
+    isTranslating = false;
+
+    const result = {
+        status: 'completed',
+        count: elements.length,
+        cachedCount,
+        apiCount: uncachedElements.length,
+        apiUsed: [...totalApiUsed].join(' + ') || (cachedCount > 0 ? 'Cache' : 'Unknown'),
         charCount: totalCharCount,
         duration: maxDuration,
         tokens: {
@@ -231,6 +295,9 @@ async function startTranslation() {
             completion: totalCompletionTokens
         }
     };
+
+    lastResult = result;
+    return result;
 }
 
 init();

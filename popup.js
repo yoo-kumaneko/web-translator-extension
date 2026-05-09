@@ -2,6 +2,42 @@ const statusDiv = document.getElementById('status');
 const translateBtn = document.getElementById('translateBtn');
 const stopBtn = document.getElementById('stopBtn');
 
+// Restore popup state from content script on open
+(async () => {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab) return;
+
+    chrome.tabs.sendMessage(tab.id, { action: 'getState' }, (response) => {
+        if (chrome.runtime.lastError || !response) return;
+
+        if (response.hasTranslations && response.result) {
+            const r = response.result;
+            statusDiv.style.display = 'block';
+            statusDiv.style.color = '#28a745';
+            statusDiv.innerText = `${r.count} paragraphs translated!`;
+            translateBtn.innerText = 'Redo Translation';
+
+            // Restore metrics
+            const metricsDiv = document.getElementById('metrics');
+            metricsDiv.style.display = 'block';
+            let metricsText = `Model: <strong>${r.apiUsed || 'Unknown'}</strong> • Cost: <strong>${r.charCount || 0}</strong> chars`;
+            if (r.duration) {
+                metricsText += ` • Time: <strong>${(r.duration / 1000).toFixed(1)}s</strong>`;
+            }
+            if (r.tokens && (r.tokens.prompt > 0 || r.tokens.completion > 0)) {
+                metricsText += `<br>Tokens: <strong>${r.tokens.prompt}</strong> in / <strong>${r.tokens.completion}</strong> out`;
+            }
+            if (r.cachedCount > 0) {
+                metricsText += `<br>Cached: <strong>${r.cachedCount}</strong> • API: <strong>${r.apiCount}</strong>`;
+            }
+            metricsDiv.innerHTML = metricsText;
+
+            // Restore toggle button text based on visibility
+            stopBtn.innerText = response.isVisible ? 'Hide Translation' : 'Show Translation';
+        }
+    });
+})();
+
 translateBtn.addEventListener('click', async () => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
@@ -25,11 +61,11 @@ translateBtn.addEventListener('click', async () => {
             } else if (response && response.status === 'completed') {
                 statusDiv.innerText = `${response.count} paragraphs translated!`;
                 statusDiv.style.color = '#28a745';
-                
+
                 // Display Metrics
                 const metricsDiv = document.getElementById('metrics');
                 metricsDiv.style.display = 'block';
-                
+
                 let metricsText = `Model: <strong>${response.apiUsed || 'Unknown'}</strong> • Cost: <strong>${response.charCount || 0}</strong> chars`;
                 if (response.duration) {
                     metricsText += ` • Time: <strong>${(response.duration / 1000).toFixed(1)}s</strong>`;
@@ -37,9 +73,13 @@ translateBtn.addEventListener('click', async () => {
                 if (response.tokens && (response.tokens.prompt > 0 || response.tokens.completion > 0)) {
                     metricsText += `<br>Tokens: <strong>${response.tokens.prompt}</strong> in / <strong>${response.tokens.completion}</strong> out`;
                 }
+                if (response.cachedCount > 0) {
+                    metricsText += `<br>Cached: <strong>${response.cachedCount}</strong> • API: <strong>${response.apiCount}</strong>`;
+                }
                 metricsDiv.innerHTML = metricsText;
 
                 translateBtn.innerText = 'Redo Translation';
+                stopBtn.innerText = 'Hide Translation';
             } else if (response && response.status === 'already_running') {
                 statusDiv.innerText = 'Already translating...';
             } else {
@@ -52,13 +92,23 @@ translateBtn.addEventListener('click', async () => {
 stopBtn.addEventListener('click', async () => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab) {
-        chrome.tabs.sendMessage(tab.id, { action: 'stopTranslation' }, () => {
-            statusDiv.innerText = 'Translation turned off.';
-            statusDiv.style.color = '#666';
-            translateBtn.innerText = 'Translate Article';
-            
-            const metricsDiv = document.getElementById('metrics');
-            if(metricsDiv) metricsDiv.style.display = 'none';
+        chrome.tabs.sendMessage(tab.id, { action: 'toggleTranslation' }, (response) => {
+            if (chrome.runtime.lastError || !response) {
+                statusDiv.innerText = 'Error: Please refresh the page.';
+                statusDiv.style.color = 'red';
+                return;
+            }
+            if (response.isVisible) {
+                stopBtn.innerText = 'Hide Translation';
+                statusDiv.innerText = 'Translation visible.';
+                statusDiv.style.display = 'block';
+                statusDiv.style.color = '#28a745';
+            } else {
+                stopBtn.innerText = 'Show Translation';
+                statusDiv.innerText = 'Translation hidden.';
+                statusDiv.style.display = 'block';
+                statusDiv.style.color = '#666';
+            }
         });
     }
 });
@@ -95,28 +145,28 @@ providerSelect.addEventListener('change', updateProviderUI);
 
 // Load existing settings
 chrome.storage.local.get([
-    'provider', 'googleApiKey', 'llmEndpoint', 'llmApiKey', 'llmModel', 
+    'provider', 'googleApiKey', 'llmEndpoint', 'llmApiKey', 'llmModel',
     'googleChunkSize', 'llmChunkSize', 'qwenMtChunkSize', 'chunkSize',
     'googleModel', 'qwenMtEndpoint', 'qwenMtApiKey', 'qwenMtModel'
 ], (result) => {
-    providerSelect.value = result.provider || 'llm'; 
+    providerSelect.value = result.provider || 'llm';
     googleModelSelect.value = result.googleModel || 'legacy';
     apiKeyInput.value = result.googleApiKey || '';
     llmEndpointInput.value = result.llmEndpoint || 'https://api.openai.com/v1';
     llmApiKeyInput.value = result.llmApiKey || '';
     llmModelInput.value = result.llmModel || 'gpt-4o-mini';
-    
+
     // Qwen MT Defaults
     qwenMtEndpointInput.value = result.qwenMtEndpoint || 'https://dashscope.aliyuncs.com/compatible-mode/v1';
     qwenMtApiKeyInput.value = result.qwenMtApiKey || '';
     qwenMtModelSelect.value = result.qwenMtModel || 'qwen-mt-flash';
-    
+
     // Chunk Sizes (with fallback to old shared chunkSize)
     const oldSharedSize = result.chunkSize || 3000;
     googleChunkSizeInput.value = result.googleChunkSize || oldSharedSize;
     llmChunkSizeInput.value = result.llmChunkSize || oldSharedSize;
     qwenMtChunkSizeInput.value = result.qwenMtChunkSize || oldSharedSize;
-    
+
     updateProviderUI();
 });
 
@@ -127,7 +177,7 @@ settingsToggle.addEventListener('click', () => {
 
 saveKeyBtn.addEventListener('click', () => {
     const key = apiKeyInput.value.trim();
-    
+
     const settings = {
         provider: providerSelect.value,
         googleModel: googleModelSelect.value,
@@ -142,7 +192,7 @@ saveKeyBtn.addEventListener('click', () => {
         qwenMtModel: qwenMtModelSelect.value,
         qwenMtChunkSize: Math.min(Math.max(parseInt(qwenMtChunkSizeInput.value.trim()) || 3000, 500), 10000)
     };
-    
+
     chrome.storage.local.set(settings, () => {
         if (chrome.runtime.lastError) {
             saveStatus.style.display = 'block';
