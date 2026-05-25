@@ -58,7 +58,7 @@ function shouldTranslate(el) {
 
     let current = el;
     while (current && current !== document.body) {
-        const classStr = (current.className || "").toString().toLowerCase();
+        const classStr = (current.className || "").toString();
         const idStr = (current.id || "").toString().toLowerCase();
         const tagName = current.tagName.toLowerCase();
 
@@ -66,10 +66,20 @@ function shouldTranslate(el) {
         if (EXCLUDE_KEYWORDS.some(kw => idStr.includes(kw))) return false;
         const classTokens = classStr.split(/\s+/);
         if (classTokens.some(token => {
+            // Skip CSS-in-JS / JSS class names (PascalCase prefix like "Header-headerHeight")
+            // These are component styling classes, not semantic section indicators
+            if (/^[A-Z]/.test(token)) return false;
             // Strip Tailwind group modifiers (e.g., "group/header-bar" → "header-bar")
             // and arbitrary values in brackets (e.g., "scroll-mt-[calc(var(--header-h))]" → "scroll-mt-")
-            const base = token.split('/').pop().replace(/\[.*?\]/g, '');
-            return EXCLUDE_KEYWORDS.some(kw => base.startsWith(kw));
+            const base = token.toLowerCase().split('/').pop().replace(/\[.*?\]/g, '');
+            return EXCLUDE_KEYWORDS.some(kw => {
+                if (!base.startsWith(kw)) return false;
+                if (base.length === kw.length) return true;
+                const next = base[kw.length];
+                // Match kebab-case/snake_case separators (e.g., "comment-list", "nav_bar")
+                // Don't match camelCase continuations (e.g., "commentOnSelection", "navItem")
+                return next === '-' || next === '_';
+            });
         })) return false;
         if (current.getAttribute('role') === 'button' || current.getAttribute('role') === 'menuitem') return false;
 
